@@ -1,0 +1,17 @@
+{
+  "name": "experthub-kenya",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cd backend && npm run dev",
+    "start": "cd backend && npm start",
+    "install:all": "cd backend && npm install",
+    "db:generate": "cd backend && npm run db:generate",
+    "db:migrate": "cd backend && npm run db:migrate",
+    "db:deploy": "cd backend && npm run db:deploy",
+    "db:seed": "cd backend && npm run db:seed"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
