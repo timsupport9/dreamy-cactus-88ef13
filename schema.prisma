@@ -1,0 +1,465 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "mysql"  url = env("DATABASE_URL") }
+
+enum Role { ADMIN  EXPERT  USER }
+enum UserStatus { PENDING  ACTIVE  SUSPENDED  DELETED }
+enum ConsultationStatus { PENDING  ASSIGNED  IN_PROGRESS  COMPLETED  CANCELLED  DISPUTED }
+enum PaymentStatus { PENDING  PAID  REFUNDED  FAILED }
+enum PaymentMethod { MPESA  CARD  BANK }
+enum WithdrawalStatus { PENDING  APPROVED  PROCESSING  COMPLETED  REJECTED  FAILED }
+enum ClaimStatus { FILED  UNDER_REVIEW  RESOLVED_CLIENT  RESOLVED_EXPERT  DISMISSED  REFUNDED }
+enum ClaimType { POOR_QUALITY  NO_SHOW  DELAYED  RUDE  OTHER }
+enum PostStatus { DRAFT  PUBLISHED  ARCHIVED }
+enum TicketStatus { OPEN  IN_PROGRESS  RESOLVED  CLOSED }
+enum DiscountType { PERCENTAGE  FIXED }
+
+model User {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  passwordHash   String     @map("password_hash")
+  name           String
+  phone          String?
+  avatarUrl      String?    @map("avatar_url")
+  bio            String?    @db.Text
+  role           Role       @default(USER)
+  status         UserStatus @default(PENDING)
+  emailVerified  Boolean    @default(false) @map("email_verified")
+  lastLoginAt    DateTime?  @map("last_login_at")
+  referralCode   String?    @unique @map("referral_code")
+  referredById   String?    @map("referred_by_id")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  referredBy       User?  @relation("Referrals", fields: [referredById], references: [id])
+  referrals        User[] @relation("Referrals")
+  expertProfile    ExpertProfile?
+  passwordResets   PasswordReset[]
+  posts            Post[]
+  comments         Comment[]
+  likes            Like[]
+  reviewsWritten   Review[] @relation("ReviewAuthor")
+  reviewsReceived  Review[] @relation("ReviewTarget")
+  consultations    Consultation[] @relation("ClientConsultations")
+  expertConsults   Consultation[] @relation("ExpertConsultations")
+  messages         Message[]
+  notifications    Notification[]
+  supportTickets   SupportTicket[]
+  supportReplies   SupportMessage[]
+  claims           Claim[]
+  enrollments      Enrollment[]
+  withdrawals      Withdrawal[]
+  payments         Payment[]
+
+  @@index([role, status])
+  @@map("users")
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  token     String    @unique
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([token])
+  @@map("password_resets")
+}
+
+model ExpertProfile {
+  id               String   @id @default(cuid())
+  userId           String   @unique @map("user_id")
+  headline         String?
+  expertise        Json
+  bio              String?  @db.Text
+  hourlyRate       Float    @default(0) @map("hourly_rate")
+  yearsExperience  Int      @default(0) @map("years_experience")
+  languages        Json
+  totalEarnings    Float    @default(0) @map("total_earnings")
+  availableBalance Float    @default(0) @map("available_balance")
+  pendingPayout    Float    @default(0) @map("pending_payout")
+  totalPaidOut     Float    @default(0) @map("total_paid_out")
+  averageRating    Float    @default(0) @map("average_rating")
+  totalReviews     Int      @default(0) @map("total_reviews")
+  completionRate   Float    @default(0) @map("completion_rate")
+  isVerified       Boolean  @default(false) @map("is_verified")
+  isAvailable      Boolean  @default(true) @map("is_available")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  services     Service[]
+  availability Availability[]
+  timeOff      TimeOff[]
+  @@map("expert_profiles")
+}
+
+model Service {
+  id                String   @id @default(cuid())
+  expertId          String   @map("expert_id")
+  title             String
+  slug              String   @unique
+  description       String?  @db.Text
+  serviceType       String   @default("consultation") @map("service_type")
+  price             Float
+  commissionPercent Float    @default(20) @map("commission_percent")
+  expertPayout      Float    @map("expert_payout")
+  durationMinutes   Int      @default(60) @map("duration_minutes")
+  category          String?
+  tags              Json
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  expert        ExpertProfile @relation(fields: [expertId], references: [userId], onDelete: Cascade)
+  consultations Consultation[]
+  @@index([expertId, isActive])
+  @@map("services")
+}
+
+model Availability {
+  id        String   @id @default(cuid())
+  expertId  String   @map("expert_id")
+  dayOfWeek Int      @map("day_of_week")
+  startTime String   @map("start_time")
+  endTime   String   @map("end_time")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  expert    ExpertProfile @relation(fields: [expertId], references: [userId], onDelete: Cascade)
+  @@unique([expertId, dayOfWeek, startTime])
+  @@map("availability")
+}
+
+model TimeOff {
+  id        String   @id @default(cuid())
+  expertId  String   @map("expert_id")
+  startDate DateTime @map("start_date")
+  endDate   DateTime @map("end_date")
+  reason    String?
+  status    String   @default("pending")
+  createdAt DateTime @default(now()) @map("created_at")
+  expert    ExpertProfile @relation(fields: [expertId], references: [userId], onDelete: Cascade)
+  @@map("time_off")
+}
+
+model Consultation {
+  id               String             @id @default(cuid())
+  clientId         String             @map("client_id")
+  expertId         String?            @map("expert_id")
+  serviceId        String?            @map("service_id")
+  title            String
+  description      String?            @db.Text
+  consultationType String             @default("chat") @map("consultation_type")
+  status           ConsultationStatus @default(PENDING)
+  paymentStatus    PaymentStatus      @default(PENDING) @map("payment_status")
+  amount           Float              @default(0)
+  commissionAmount Float              @default(0) @map("commission_amount")
+  expertPayout     Float              @default(0) @map("expert_payout")
+  couponId         String?            @map("coupon_id")
+  discountAmount   Float              @default(0) @map("discount_amount")
+  rating           Int?
+  reviewId         String?            @unique @map("review_id")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  completedAt      DateTime?          @map("completed_at")
+
+  client       User    @relation("ClientConsultations", fields: [clientId], references: [id])
+  expert       User?   @relation("ExpertConsultations", fields: [expertId], references: [id])
+  service      Service? @relation(fields: [serviceId], references: [id])
+  coupon       Coupon?  @relation(fields: [couponId], references: [id])
+  messages     Message[]
+  attachments  Attachment[]
+  review       Review?  @relation(fields: [reviewId], references: [id])
+  payments     Payment[]
+  claims       Claim[]
+  @@index([clientId, status])
+  @@index([expertId, status])
+  @@map("consultations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  consultationId String       @map("consultation_id")
+  senderId       String       @map("sender_id")
+  body           String       @db.Text
+  isRead         Boolean      @default(false) @map("is_read")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  consultation   Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id])
+  @@index([consultationId, createdAt])
+  @@map("messages")
+}
+
+model Attachment {
+  id             String   @id @default(cuid())
+  consultationId String   @map("consultation_id")
+  uploaderId     String   @map("uploader_id")
+  fileName       String   @map("file_name")
+  fileUrl        String   @map("file_url")
+  mimeType       String   @map("mime_type")
+  size           Int
+  createdAt      DateTime @default(now()) @map("created_at")
+  consultation   Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  @@map("attachments")
+}
+
+model Review {
+  id             String        @id @default(cuid())
+  authorId       String        @map("author_id")
+  targetId       String        @map("target_id")
+  consultationId String?       @unique @map("consultation_id")
+  rating         Int
+  title          String?
+  body           String?       @db.Text
+  isPublished    Boolean       @default(true) @map("is_published")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  author         User          @relation("ReviewAuthor", fields: [authorId], references: [id])
+  target         User          @relation("ReviewTarget", fields: [targetId], references: [id])
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  @@index([targetId, isPublished])
+  @@map("reviews")
+}
+
+model Post {
+  id            String     @id @default(cuid())
+  authorId      String     @map("author_id")
+  title         String
+  slug          String     @unique
+  excerpt       String?    @db.Text
+  content       String     @db.Text
+  coverImage    String?    @map("cover_image")
+  category      String?
+  tags          Json
+  status        PostStatus @default(DRAFT)
+  isFeatured    Boolean    @default(false) @map("is_featured")
+  views         Int        @default(0)
+  likesCount    Int        @default(0) @map("likes_count")
+  commentsCount Int        @default(0) @map("comments_count")
+  publishedAt   DateTime?  @map("published_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  author        User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments      Comment[]
+  likes         Like[]
+  @@index([status, publishedAt])
+  @@map("posts")
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  postId    String    @map("post_id")
+  authorId  String    @map("author_id")
+  parentId  String?   @map("parent_id")
+  body      String    @db.Text
+  isHidden  Boolean   @default(false) @map("is_hidden")
+  createdAt DateTime  @default(now()) @map("created_at")
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id])
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  @@index([postId, createdAt])
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+  @@unique([postId, userId])
+  @@map("likes")
+}
+
+model Event {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  description     String?  @db.Text
+  eventType       String   @default("workshop") @map("event_type")
+  expertId        String?  @map("expert_id")
+  startDate       DateTime @map("start_date")
+  endDate         DateTime @map("end_date")
+  maxParticipants Int      @default(30) @map("max_participants")
+  price           Float    @default(0)
+  status          String   @default("active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  enrollments     Enrollment[]
+  @@map("events")
+}
+
+model Enrollment {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  eventId     String?  @map("event_id")
+  programType String   @map("program_type")
+  programId   String   @map("program_id")
+  status      String   @default("enrolled")
+  progress    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event       Event?   @relation(fields: [eventId], references: [id])
+  @@unique([userId, programType, programId])
+  @@map("enrollments")
+}
+
+model Bootcamp {
+  id            String   @id @default(cuid())
+  title         String
+  slug          String   @unique
+  description   String   @db.Text
+  category      String
+  durationWeeks Int      @map("duration_weeks")
+  intensity     String
+  price         Float
+  maxStudents   Int      @default(30) @map("max_students")
+  expertId      String?  @map("expert_id")
+  startDate     DateTime @map("start_date")
+  status        String   @default("active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  @@map("bootcamps")
+}
+
+model ShortCourse {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  description     String   @db.Text
+  category        String
+  durationHours   Int      @map("duration_hours")
+  price           Float
+  difficultyLevel String   @map("difficulty_level")
+  expertId        String?  @map("expert_id")
+  status          String   @default("published")
+  createdAt       DateTime @default(now()) @map("created_at")
+  @@map("short_courses")
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  userId            String        @map("user_id")
+  consultationId    String?       @map("consultation_id")
+  amount            Float
+  currency          String        @default("KES")
+  commissionAmount  Float         @default(0) @map("commission_amount")
+  expertPayout      Float         @default(0) @map("expert_payout")
+  status            PaymentStatus @default(PENDING)
+  method            PaymentMethod @default(MPESA)
+  mpesaReceipt      String?       @unique @map("mpesa_receipt")
+  mpesaPhone        String?       @map("mpesa_phone")
+  checkoutRequestId String?       @unique @map("checkout_request_id")
+  merchantRequestId String?       @map("merchant_request_id")
+  rawCallback       Json?         @map("raw_callback")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  user              User          @relation(fields: [userId], references: [id])
+  consultation      Consultation? @relation(fields: [consultationId], references: [id])
+  @@index([userId, status])
+  @@map("payments")
+}
+
+model Withdrawal {
+  id               String           @id @default(cuid())
+  expertId         String           @map("expert_id")
+  amount           Float
+  method           String
+  accountDetails   Json             @map("account_details")
+  status           WithdrawalStatus @default(PENDING)
+  rejectionReason  String?          @map("rejection_reason")
+  holdingPeriodEnd DateTime         @map("holding_period_end")
+  approvedBy       String?          @map("approved_by")
+  approvedAt       DateTime?        @map("approved_at")
+  processedAt      DateTime?        @map("processed_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  expert           User             @relation(fields: [expertId], references: [id])
+  @@index([expertId, status])
+  @@map("withdrawals")
+}
+
+model Coupon {
+  id             String       @id @default(cuid())
+  code           String       @unique
+  description    String?
+  discountType   DiscountType @map("discount_type")
+  discountValue  Float        @map("discount_value")
+  minOrderAmount Float        @default(0) @map("min_order_amount")
+  maxUses        Int?         @map("max_uses")
+  usedCount      Int          @default(0) @map("used_count")
+  expiresAt      DateTime     @map("expires_at")
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  consultations  Consultation[]
+  @@index([code, isActive])
+  @@map("coupons")
+}
+
+model Claim {
+  id             String       @id @default(cuid())
+  clientId       String       @map("client_id")
+  consultationId String?      @map("consultation_id")
+  claimType      ClaimType    @map("claim_type")
+  title          String
+  description    String       @db.Text
+  amount         Float        @default(0)
+  status         ClaimStatus  @default(FILED)
+  resolution     String?      @db.Text
+  refundAmount   Float        @default(0) @map("refund_amount")
+  resolvedBy     String?      @map("resolved_by")
+  resolvedAt     DateTime?    @map("resolved_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  client         User         @relation(fields: [clientId], references: [id])
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  @@index([status])
+  @@map("claims")
+}
+
+model SupportTicket {
+  id        String         @id @default(cuid())
+  userId    String         @map("user_id")
+  subject   String
+  category  String         @default("general")
+  status    TicketStatus   @default(OPEN)
+  priority  String         @default("normal")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+  user      User           @relation(fields: [userId], references: [id])
+  messages  SupportMessage[]
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id        String        @id @default(cuid())
+  ticketId  String        @map("ticket_id")
+  authorId  String        @map("author_id")
+  body      String        @db.Text
+  isStaff   Boolean       @default(false) @map("is_staff")
+  createdAt DateTime      @default(now()) @map("created_at")
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id])
+  @@index([ticketId, createdAt])
+  @@map("support_messages")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  title     String
+  message   String   @db.Text
+  type      String   @default("system")
+  link      String?
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model CommissionConfig {
+  id         String   @id @default(cuid())
+  type       String   @unique
+  percentage Float
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  @@map("commission_configs")
+}
